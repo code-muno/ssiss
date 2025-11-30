@@ -1,181 +1,75 @@
-// src/context/AuthContext.jsx
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
 
-// 1) Create context
-export const AuthContext = createContext(null);
+// 1. Create the Context object
+export const AuthContext = createContext();
 
-// 2) Helper: set axios auth header
-function setAxiosAuthToken(token) {
-  if (token) {
-    axios.defaults.headers.common.Authorization = `Bearer ${token}`;
-  } else {
-    delete axios.defaults.headers.common.Authorization;
-  }
-}
-
-// 3) Provider implementation
+// 2. Create the Provider component
 export const AuthProvider = ({ children }) => {
-  // state
-  const [user, setUser] = useState(null);
-  const [token, setToken] = useState(null);
-  const [loading, setLoading] = useState(true); // true while we check localStorage / validate token
-  const [error, setError] = useState(null);
+    // State to hold the user object and the token
+    const [user, setUser] = useState(null);
+    const [token, setToken] = useState(null);
 
-  // base URL for axios (change to your deployed API in production)
-  axios.defaults.baseURL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+    // Set the base URL for Axios
+    axios.defaults.baseURL = import.meta.env.VITE_API_BASE_URL;
 
-  // helper to persist auth into state + localStorage + axios header
-  const persistAuth = useCallback((newToken, newUser) => {
-    if (newToken) {
-      setToken(newToken);
-      localStorage.setItem('auth_token', newToken);
-      setAxiosAuthToken(newToken);
-    }
-
-    if (newUser) {
-      setUser(newUser);
-      // optionally: persist minimal user info
-      localStorage.setItem('auth_user', JSON.stringify(newUser));
-    }
-  }, []);
-
-  // login function
-  const login = async (email, password) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await axios.post('/auth/login', { email, password });
-      // Expecting either { token, user } or { token }
-      const { token: resToken, user: resUser } = res.data;
-
-      if (!resToken) {
-        // backend didn't return token: throw
-        throw new Error('Authentication failed: no token returned by server.');
-      }
-
-      // persist token + user
-      persistAuth(resToken, resUser || null);
-
-      // if server didn't return user, attempt to fetch profile
-      if (!resUser) {
-        try {
-          const me = await axios.get('/auth/me');
-          setUser(me.data.user || me.data);
-          localStorage.setItem('auth_user', JSON.stringify(me.data.user || me.data));
-        } catch (e) {
-          // profile fetch failed — still logged in with token, but warn
-          console.warn('Failed to fetch profile after login:', e);
-        }
-      }
-
-      setLoading(false);
-      return { ok: true };
-    } catch (error) {
-      console.error('Login failed:', error);
-      setError(error.response?.data?.error || error.message || 'Login failed');
-      setLoading(false);
-      return { ok: false, error: error || error.message };
-    }
-  };
-
-  // register function (optional helper)
-  const register = async (name, email, password) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await axios.post('/auth/register', { name, email, password });
-      // If register returns token, auto-login behaviour:
-      const { token: resToken, user: resUser } = res.data;
-      if (resToken) {
-        persistAuth(resToken, resUser || null);
-      }
-      setLoading(false);
-      return { ok: true, data: res.data };
-    } catch (err) {
-      console.error('Register failed:', err);
-      setError(err.response?.data?.error || err.message || 'Register failed');
-      setLoading(false);
-      return { ok: false, error: error || err.message };
-    }
-  };
-
-  // logout
-  const logout = () => {
-    setUser(null);
-    setToken(null);
-    setError(null);
-    setAxiosAuthToken(null);
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('auth_user');
-    // Optionally call backend logout endpoint to invalidate refresh tokens (if you implement them)
-    // axios.post('/auth/logout').catch(() => {});
-  };
-
-  // try to load token/user from storage on mount and validate token
-  useEffect(() => {
-    const init = async () => {
-      const storedToken = localStorage.getItem('auth_token');
-      const storedUser = localStorage.getItem('auth_user');
-
-      if (!storedToken) {
-        setLoading(false);
-        return;
-      }
-
-      // set token on axios and in state immediately to allow parallel requests
-      setAxiosAuthToken(storedToken);
-      setToken(storedToken);
-
-      if (storedUser) {
-        try {
-          setUser(JSON.parse(storedUser));
-        } catch (e) {
-          // ignore parse errors
-          localStorage.removeItem('auth_user');
-        }
-      }
-
-      // attempt to validate token by calling /auth/me (if backend exposes it)
-      try {
-        const res = await axios.get('/auth/me');
-        // typical response shape: { user: { ... } } or direct user object
-        const validatedUser = res.data.user || res.data;
-        setUser(validatedUser);
-        localStorage.setItem('auth_user', JSON.stringify(validatedUser));
-      } catch (err) {
-        console.warn('Token validation failed, clearing auth', err);
-        // invalid token — clear
-        logout();
-      } finally {
-        setLoading(false);
-      }
+    // 3. User Login Function 
+    const login = (userData) => {
+        // We will call this function after a successful API call
+        setUser(userData.user);
+        setToken(userData.token);
+        
+        // Save the token/user data to local storage for persistence
+        localStorage.setItem('token', userData.token);
+        localStorage.setItem('user', JSON.stringify(userData.user));
     };
 
-    init();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // run once on mount
+    // 4. User Logout Function
+    const logout = () => {
+        setUser(null);
+        setToken(null);
+        // Also remove the token from localStorage (we'll add this persistence later)
+        console.log('User logged out');
+    };
+    // 4a. User Registration Function
+    const registerUser = async (name, email, password) => {
+        try {
+            const response = await axios.post('/auth/register', { 
+                name, 
+                email, 
+                password 
+            });
 
-  // context value
+            // If registration is successful, we can automatically log them in
+            login(response.data); // Use the data from the server response
+            
+            // Return true for components to handle navigation
+            return true; 
+        } catch (error) {
+            console.error("Registration failed:", error.response.data);
+            // Throw the error for the component to display to the user
+            throw error.response.data; 
+        }
+    };
+
+    // 5. Context Value - The data and functions we expose
   const contextValue = {
-    user,
-    token,
-    login,
-    register,
-    logout,
-    isAuthenticated: !!user,
-    loading,
-    error,
-  };
+        user,
+        token,
+        login, // We keep the original login function name for simplicity
+        logout,
+        registerUser, // 👈 Expose the new registration function
+        isAuthenticated: !!user,
+    };
 
-  return <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>;
+    return (
+        <AuthContext.Provider value={contextValue}>
+            {children}
+        </AuthContext.Provider>
+    );
 };
 
-// 4) Custom hook
+// 6. Custom Hook for easy use
 export const useAuth = () => {
-  const ctx = useContext(AuthContext);
-  if (ctx === undefined || ctx === null) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return ctx;
+    return useContext(AuthContext);
 };
